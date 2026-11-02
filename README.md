@@ -181,7 +181,15 @@ pnpm pack
 node scripts/check-pack.mjs /tmp/packed/package   # 校验打包产物本身
 ```
 
-CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在 **Node 20 / 22 / 24** 三档上跑 `validate + lint + format:check + test`，并额外把 `pnpm pack` 的产物解包，用 `scripts/check-pack.mjs` 再验一遍：这样 `files` 漏配这类"仓库里有、装出来没有"的问题才会在 CI 被抓住。
+CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）分三个 job：
+
+| job                            | 内容                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| `check`（Node 22 / 24）        | `validate + lint + format:check + test`，用 pnpm 装真依赖                   |
+| `runtime`（Node 20 / 22 / 24） | **不装任何依赖**，只跑 `validate + test`，证明没有任何构建步骤              |
+| `package`                      | `pnpm pack` 后检查 tarball 内容，并解包用 `scripts/check-pack.mjs` 再验一遍 |
+
+`runtime` 单独拆出来的原因：pnpm 11 自身要求 Node ≥ 22.13，而插件的运行时下限是 Node 20；把"运行时兼容"和"工具链兼容"分开测，两者都不会被对方的下限绑架。`package` job 负责抓 `files` 漏配这类"仓库里有、装出来没有"的问题。
 
 两个校验脚本都做过**负向测试**：故意改坏路径时它们必须非零退出（见 §4）。
 

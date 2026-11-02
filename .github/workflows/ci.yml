@@ -20,7 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '22', '24']
+        # pnpm 11 itself requires Node >= 22.13, which is why Node 20 runs in the
+        # dependency-free `runtime` job below instead of here.
+        node: ['22', '24']
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +50,32 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+  runtime:
+    name: runtime (Node ${{ matrix.node }}, no dependencies)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # index.js has no imports and there is no build step, so the shipped
+      # artifact must work on the oldest supported Node with nothing installed.
+      - name: Nothing is installed
+        run: |
+          test ! -d node_modules || { echo "::error::node_modules must not exist"; exit 1; }
+
+      - name: Bundle contract
+        run: node scripts/validate.mjs
+
+      - name: Unit tests
+        run: node --test test/*.mjs
+
   package:
     name: packaged contents
     runs-on: ubuntu-latest
@@ -73,7 +101,9 @@ jobs:
           set -euo pipefail
           tarball=$(ls ./*.tgz)
           echo "tarball: $tarball"
-          tar -tzf "$tarball" | sort
+          listing=$(tar -tzf "$tarball")
+          printf '%s\n' "$listing"
+          missing=0
           for required in \
             package/package.json \
             package/index.js \
@@ -84,8 +114,14 @@ jobs:
             package/README.md \
             package/LICENSE
           do
-            tar -tzf "$tarball" | grep -qx "$required" || { echo "::error::tarball is missing $required"; exit 1; }
+            # No pipe here on purpose: `tar | grep -q` trips `pipefail` through
+            # SIGPIPE as soon as grep exits early.
+            if ! grep -qx "$required" <<<"$listing"; then
+              echo "::error::tarball is missing $required"
+              missing=1
+            fi
           done
+          [ "$missing" -eq 0 ]
           echo "all required entries present"
 
       - name: Validate the unpacked artifact
