@@ -1,0 +1,4 @@
+- insert:
+    - id: steer-background-tool
+      name: '@local/steer-background-tool'
+      config: {}

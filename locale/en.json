@@ -1,0 +1,6 @@
+{
+	"meta": {
+		"title": "Steer → Background Tool",
+		"description": "Turns a tool call that is still running into a background job when you steer, so your message reaches the agent right away instead of waiting behind the tool."
+	}
+}

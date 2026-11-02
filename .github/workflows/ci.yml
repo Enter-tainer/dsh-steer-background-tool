@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # A bundle's real failure mode is a wrong path in package.json, not a
+      # syntax error: Plugin Manager reads the icon and locale from disk and the
+      # Loader reads dsh.bundle.patch without ever running the plugin.
+      - name: Bundle contract
+        run: pnpm run validate
+
+      - name: Lint (oxlint)
+        run: pnpm run lint
+
+      - name: Format check (oxfmt)
+        run: pnpm run format:check
+
+      - name: Unit tests
+        run: pnpm test
+
+  package:
+    name: packaged contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Pack
+        run: pnpm pack
+
+      # Installing the bundle must not depend on dev files or on files that were
+      # left out of `files`, so assert the runtime contract is inside the tarball.
+      - name: Verify tarball carries the runtime contract
+        run: |
+          set -euo pipefail
+          tarball=$(ls ./*.tgz)
+          echo "tarball: $tarball"
+          tar -tzf "$tarball" | sort
+          for required in \
+            package/package.json \
+            package/index.js \
+            package/cordis.patch.yml \
+            package/icon.svg \
+            package/locale/en.json \
+            package/locale/zh.json \
+            package/README.md \
+            package/LICENSE
+          do
+            tar -tzf "$tarball" | grep -qx "$required" || { echo "::error::tarball is missing $required"; exit 1; }
+          done
+          echo "all required entries present"
+
+      - name: Validate the unpacked artifact
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/packed
+          tar -xzf ./*.tgz -C /tmp/packed
+          node scripts/check-pack.mjs /tmp/packed/package
