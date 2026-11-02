@@ -18,7 +18,7 @@ git clone https://github.com/Enter-tainer/dsh-steer-background-tool.git
 
 然后在 Harness 的 **Plugin Manager** 里以本地路径安装这个目录（或先 `pnpm pack` 再安装生成的 `.tgz`）。安装后该行即为 `active`，无需重启即可生效。
 
-改配置见 [§3 配置](#3-配置)；卸载见 [§7 卸载](#7-卸载)。
+改配置见 [§3 配置](#3-配置)；卸载见 [§8 卸载](#8-卸载)。
 
 ---
 
@@ -204,6 +204,25 @@ CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）分三个 job：
 
 ---
 
-## 7. 卸载
+---
+
+## 7. 相关实现（有没有人做过类似的）
+
+**有，而且不少 —— 但触发点不同。** "长工具不该阻塞对话"是共识；差异在**什么时候**把调用让到后台。
+
+| 实现                                                                                                           | 触发                                              | 机制                                                                                                                               | 与本案的差异                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Claude Code `Ctrl+B`                                                                                           | 手动按键                                          | 把 Bash 命令 / 子 Agent 转后台                                                                                                     | 手动，不是"插话即触发"；`Esc` 走的是**中断**当前工具调用（保留已完成的工作），不是保活转后台                       |
+| Claude Code `CLAUDE_AUTO_BACKGROUND_TASKS`                                                                     | 时间（约 2 分钟）                                 | 子 Agent 到点自动转后台                                                                                                            | 只针对 subagent，不针对任意工具调用                                                                                |
+| QwenPaw / AgentScope 双 deadline                                                                               | 时间（`offload_deadline` ≈ 超时 × 0.5）+ 手动 API | `ToolCoordinator` 把调用 offload，前台立刻拿到一个引导模型继续的 tool result，工具在后台继续跑；`kill_deadline` 管执行上限         | 时间/手动触发，默认 `keep_foreground`，没有把"用户插话"当作信号                                                    |
+| [`@argszero/cordis-plugin-steer-preempt`](https://www.npmjs.com/package/@argszero/cordis-plugin-steer-preempt) | **用户插话（同一生态）**                          | 只针对 `job_output(wait: true)`：换掉派生的 `AbortSignal` 让阻塞的等待提前返回，再把错误结果替换成 `STEER_PREEMPTED`；**不杀 job** | 解决的是"已经被后台任务阻塞住的等待"，不会把工具调用本身转后台。**与本插件互补**：它管阻塞读取，本插件管前台长调用 |
+| [OpenAI Codex CLI #14602](https://github.com/openai/codex/pull/14602)                                          | 中断时                                            | 把正在跑的 unified-exec 进程保成 background terminal，避免中断丢进程                                                               | 偏终端进程生命周期管理                                                                                             |
+| persistent-terminal 类 MCP server                                                                              | 外部服务                                          | 命令跑在外部持久终端，Agent 轮询输出                                                                                               | 需要额外常驻进程，不是 harness 内建的 job 机制                                                                     |
+
+上游也记录过这个痛点：同生态的 `steer-preempt` 引用了 DSH 的 discussion #6030（插话要等到 step 边界）和 #6285（阻塞读取拿不到新输出）。
+
+所以更准确的说法是：**"插话把正在跑的工具调用转成后台任务"这个具体触发点，在 DSH 生态里此前没有**；最接近的同生态实现处理的是另一半问题。
+
+## 8. 卸载
 
 Plugin Manager 里移除 `@local/steer-background-tool` 即可（或 `remove_bundle`）。插件卸载会还原它套在工具定义上的 wrapper。
