@@ -1,6 +1,6 @@
 {
 	"name": "@local/steer-background-tool",
-	"version": "1.0.0",
+	"version": "2.0.0",
 	"private": true,
 	"description": "Backgrounds an in-flight tool call when the user steers, so the message is not blocked behind a long tool.",
 	"keywords": [

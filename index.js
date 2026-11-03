@@ -45,8 +45,18 @@ const DEFAULTS = {
 	maxJobsPerSteer: 4,
 	/** Advisory cap on each job's model-facing output; 0 disables the cap. */
 	outputLimitBytes: 65536,
-	/** Tool names that must never be backgrounded. */
-	excludeTools: [],
+	/**
+	 * Tools this plugin may background.
+	 *
+	 * Deliberately a short allowlist rather than "everything except". Releasing a
+	 * call before it settles is only sound where the work genuinely outlives the
+	 * step and the model may legitimately act on it later: shell commands, whose
+	 * progress is independent of the conversation. For other tools the step's
+	 * assumptions do not survive the release — an edit not yet written, a result
+	 * the next prompt is built from — so they stay synchronous. `bash` and `pwsh`
+	 * are the registered names of both the one-shot and the persistent shells.
+	 */
+	includeTools: ['bash', 'pwsh'],
 	/** Add a system-prompt section describing the behaviour to the model. */
 	guidance: true,
 	/** Background for a queued follow-up (next turn) as well as a steer (next step). */
@@ -105,7 +115,7 @@ export function apply(ctx, rawConfig) {
 		ctx.systemPrompt.section({
 			name: 'tool:steer-background',
 			order: typeof base === 'number' ? base + 10 : 1610,
-			text: 'A tool call you started can be moved to the background while it is still running, when the user sends a new message first. Its result is then replaced by a short notice naming a background job id, and the user message arrives in the next step. That is not a failure and the work was not cancelled: do not run the same call again. The real output is kept by the job — read it with job_output and that id, exactly like any other background job, and expect a completion notice when it settles.',
+			text: 'A shell command you started can be moved to the background while it is still running, when the user sends a new message first. Its result is then replaced by a short notice naming a background job id, and the user message arrives in the next step. That is not a failure and the work was not cancelled: do not run the same call again. The real output is kept by the job — read it with job_output and that id, exactly like any other background job, and expect a completion notice when it settles.',
 		});
 	}
 
@@ -134,7 +144,7 @@ export function apply(ctx, rawConfig) {
 		// Nested sub-dispatches (run_code's SDK) answer their caller, not the
 		// model, so replying with a backgrounded placeholder would be wrong.
 		if (exec.parent !== undefined) return next();
-		if (config.excludeTools.includes(exec.name)) return next();
+		if (!config.includeTools.includes(exec.name)) return next();
 
 		const tool = getTool(ctx, exec.name, agent);
 		if (tool !== undefined) captureBody(tool);
@@ -761,8 +771,8 @@ function normalizeConfig(raw) {
 		config.maxJobsPerSteer = input.maxJobsPerSteer;
 	if (Number.isSafeInteger(input.outputLimitBytes) && input.outputLimitBytes >= 0)
 		config.outputLimitBytes = input.outputLimitBytes;
-	if (Array.isArray(input.excludeTools))
-		config.excludeTools = input.excludeTools.filter((entry) => typeof entry === 'string');
+	if (Array.isArray(input.includeTools))
+		config.includeTools = input.includeTools.filter((entry) => typeof entry === 'string');
 	return config;
 }
 

@@ -224,10 +224,10 @@ test('ignores non-user message sources', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. excludeTools.
+// 6. Scope: only shell commands are backgrounded.
 // ---------------------------------------------------------------------------
-test('excludeTools leaves the call in the foreground', async () => {
-	const h = harness({ excludeTools: ['bash'] });
+test('a tool outside includeTools stays in the foreground', async () => {
+	const h = harness({ includeTools: [] });
 	const message = steerMessage();
 	const agent = agentWith(message, 'nextStep');
 	const { settled } = dispatch(h, agent);
@@ -237,6 +237,33 @@ test('excludeTools leaves the call in the foreground', async () => {
 	assert.equal(h.started.length, 0);
 	assert.equal(result.isError, false);
 	assert.equal(result.value.cwd, '/x', 'the real result must come through');
+});
+
+test('a non-shell tool is never backgrounded, even with a pending steer', async () => {
+	// The default allowlist is bash/pwsh: releasing anything else would break the
+	// step's assumptions (an edit not yet written, a result the prompt needs now).
+	const h = harness({}, { toolName: 'edit' });
+	const message = steerMessage();
+	const agent = agentWith(message, 'nextStep');
+	const { settled } = dispatch(h, agent);
+	deliver(h, agent, message);
+	h.definition.__resolve({ cwd: '/x' });
+	const result = await settled;
+	assert.equal(h.started.length, 0, 'no job may be opened for a non-shell tool');
+	assert.equal(result.isError, false);
+	assert.equal(result.value.cwd, '/x');
+});
+
+test('pwsh is in the default allowlist', async () => {
+	const h = harness({}, { toolName: 'pwsh' });
+	const message = steerMessage();
+	const agent = agentWith(message, 'nextStep');
+	const { settled } = dispatch(h, agent);
+	deliver(h, agent, message);
+	const result = await Promise.race([settled, tick().then(() => 'PENDING')]);
+	assert.notEqual(result, 'PENDING', 'the step must be released for a shell command');
+	assert.equal(h.started.length, 1);
+	assert.equal(h.started[0].spec.kind, 'tool');
 });
 
 // ---------------------------------------------------------------------------
