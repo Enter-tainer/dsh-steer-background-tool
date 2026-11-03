@@ -83,7 +83,7 @@ function harness(config = {}, options = {}) {
 
 	apply(ctx, config);
 
-	return { handlers, warnings, sections, started, definition, dispose: () => disposer?.() };
+	return { handlers, warnings, sections, started, definition, options, dispose: () => disposer?.() };
 }
 
 /** A user-authored steer message already queued for the next step. */
@@ -115,8 +115,15 @@ function dispatch(h, agent, execOverrides = {}) {
 		...execOverrides,
 	};
 	const next = async () => {
-		const value = await h.definition.execute(exec.arguments, exec);
-		return { isError: false, value, content: [] };
+		try {
+			const value = await h.definition.execute(exec.arguments, exec);
+			return { isError: false, value, content: [] };
+		} finally {
+			// The real registry restores exec.signal in a finally block; once
+			// notifyResult has frozen the record that assignment throws, so the
+			// released promise rejects even though the tool succeeded.
+			if (h.options?.emulateFrozenExec === true) exec.signal = new AbortController().signal;
+		}
 	};
 	const settled = h.handlers.get('tools/execute')(exec, next);
 	return { exec, settled };
@@ -174,6 +181,31 @@ test('backgrounds on steer and releases the step while the body runs', async () 
 	const outcome = await h.started[0].hooks.done;
 	assert.equal(outcome.status, 'completed');
 	assert.match(outcome.result, /rendered:\{"cwd":"\/work"\}/, 'job carries the tool-rendered output');
+});
+
+// ---------------------------------------------------------------------------
+// 2b. The frozen record: why the definition wrapper exists.
+// ---------------------------------------------------------------------------
+test('recovers the real output although the registry freezes the record', async () => {
+	// Without the pass-through wrapper on tool.execute, a released dispatch can no
+	// longer carry its value: the registry freezes exec once the call is reported,
+	// so the abandoned chain rejects in its own cleanup and the job would have to
+	// report "output is unavailable". This pins the wrapper as load-bearing.
+	const h = harness({}, { emulateFrozenExec: true });
+	const message = steerMessage();
+	const agent = agentWith(message, 'nextStep');
+	const { exec, settled } = dispatch(h, agent);
+
+	deliver(h, agent, message);
+	const synthetic = await settled;
+	assert.equal(synthetic.isError, false, 'the step is released with a synthetic success');
+
+	Object.freeze(exec); // what notifyResult does before the tool settles
+	h.definition.__resolve({ cwd: '/after-freeze' });
+
+	const outcome = await h.started[0].hooks.done;
+	assert.equal(outcome.status, 'completed');
+	assert.match(String(outcome.result), /after-freeze/, 'the real value must survive the freeze');
 });
 
 // ---------------------------------------------------------------------------
