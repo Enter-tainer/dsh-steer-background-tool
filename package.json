@@ -46,8 +46,8 @@
 		"check": "node scripts/validate.mjs && oxlint --deny-warnings && oxfmt --check && node --test test/*.mjs"
 	},
 	"devDependencies": {
-		"oxfmt": "^0.75.0",
-		"oxlint": "^1.90.0"
+		"oxfmt": "^0.76.0",
+		"oxlint": "^1.91.0"
 	},
 	"engines": {
 		"node": ">=20.17.0"
